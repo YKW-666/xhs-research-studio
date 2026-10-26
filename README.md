@@ -4,7 +4,9 @@
 
 先判断哪些内容值得看，再把视频里的声音和画面变成带来源、时间戳的调研材料。
 
-Windows x64 · 本地转录 · Chrome 独立登录 · 无付费 API · v0.1.0 预览版
+Windows x64 · 默认轻量 · Chrome 独立登录 · 本地/云端转写可选 · v0.2.0 预览版
+
+**默认不下载 AI 模型、不安装 Python。** 搜帖、正文、评论和视频画面读取只需现有 Chrome + Node.js。新增 Node 依赖本机约 19 MB；这不包含 Chrome、Node、账号浏览器缓存和内容文件。
 
 [English](#english) · [安装](#安装) · [反馈问题](https://github.com/YKW-666/xhs-research-studio/issues/new/choose)
 
@@ -14,13 +16,13 @@ Windows x64 · 本地转录 · Chrome 独立登录 · 无付费 API · v0.1.0 �
 |---|---|
 | 找经验 | 关键词搜索，读取帖子正文、作者和可见评论 |
 | 先筛选 | 让 AI 按研究目标判断相关性、信息增量和推广倾向 |
-| 听视频 | 本地 Whisper large-v3-turbo 转录，输出 JSON、TXT、SRT 和时间戳 |
-| 看画面 | 镜头变化检测 + 定时抽帧，生成关键帧总览，可按秒补帧 |
+| 听视频（选装） | 点点官方 API 云端转写，或本地 Whisper 转录 |
+| 看画面（默认自带） | 直接用 Chrome 定位视频并保存时间戳画面，无 Python/语音模型；默认 8 帧，可指定最多 12 个时间点 |
 | 形成结论 | 具备图片理解能力的 AI 助手结合字幕与画面整理证据 |
 
 适合比赛备赛、作品集、产品与用户体验、求职、留学和工具实测。没有发布、点赞、收藏、评论或私信命令。网页访问本身仍会产生正常浏览记录。
 
-Python 脚本负责转录和抽帧；你的 AI 助手必须实际读取字幕、查看图片后才能形成视频分析。生成图片文件不等于已经看懂视频。
+轻量模式只读取画面，不声称听懂音轨。需要语音内容时选云端或本地转写。AI 助手必须实际读取文字、查看图片后才能形成分析；生成文件不等于已经理解。
 
 ## 安装
 
@@ -34,13 +36,38 @@ cd xhs-research-studio
 .\setup.ps1
 ```
 
-视频转录和画面分析：
+默认安装完成后即可读视频画面：
 
 ```powershell
-.\setup.ps1 -Video
+node scripts/reader.mjs frames '已筛选的视频帖子链接'
+# 只看关键时间点，单位秒：
+node scripts/reader.mjs frames '视频帖子链接' 30 60 120
 ```
 
-模型首次下载约 **1.6 GB**，之后本地复用。脚本核验固定版本模型文件的 SHA-256；无须 API Key。Python 不在 PATH 时，传入 `-Python 'python.exe完整路径'`。
+### 可选：点点官方云端转写（无需本地模型）
+
+在 [点点官方平台](https://dots.ai/platform/login) 登录，创建自己的 API Key，然后运行：
+
+```powershell
+.\configure-dots.ps1
+node scripts/reader.mjs dots '已筛选的视频帖子链接' --allow-cloud
+```
+
+密钥只保存到本机数据目录，也支持 `DOTS_API_KEY` 环境变量。不要把 Key 发到聊天、Issue 或提交进 Git。`--allow-cloud` 明确允许把选中的媒体地址交给点点处理，不传浏览器 Cookie。官方文档在 2026-10-26 标注免费体验，**不是永久免费承诺，使用前查看当前收费规则**。模型生成的文字不是平台原生字幕，也不保证精确时间戳。
+
+接口状态：依据 [官方音视频输入文档](https://dots.ai/platform/docs) 实现，离线协议测试通过；实际调用验收状态见后续发布说明。
+
+### 可选：完全本地语音转写
+
+仅当你需要离线语音识别，再安装：
+
+```powershell
+.\setup.ps1 -Transcribe
+```
+
+额外需要 Python 3.12，语音模型约 **1.6 GB**、Python 依赖本机约 **437 MB**；完整本地路线新增约 **2.1 GB 起**，不包含基础运行时和内容缓存。模型首次下载后共享复用，并校验 SHA-256。没有本地 ASR API 费用。Python 不在 PATH 时传 `-Python 'python.exe完整路径'`。
+
+**从 v0.1.0 升级**：`-Video` 现在只提示视频画面已包含在基础模式，不再下载模型；需要旧版完整离线转写请显式使用 `-Transcribe`。升级不会擅自删除已有环境和模型。
 
 如果系统禁止运行脚本，请遵守所在组织的执行策略；也可以阅读 setup.ps1 后手动运行其中的 npm、Python 安装命令。本项目不修改系统执行策略。
 
@@ -65,7 +92,7 @@ node scripts/reader.mjs read '搜索结果返回的完整帖子链接'
 node scripts/reader.mjs video '已筛选的视频帖子链接'
 ```
 
-首次在弹出的普通 Chrome 窗口扫码登录。脚本完成后关闭自己的窗口，登录状态会保留。`video` 返回 `sourceManifest` 路径，将它传入：
+首次在弹出的普通 Chrome 窗口扫码登录。脚本完成后关闭自己的窗口，登录状态会保留。默认用 `frames` 获取画面即可。只有选择本地完整转写路线，才用 `video` 获取媒体文件；它返回 `sourceManifest` 路径，将它传入：
 
 ```powershell
 .\.venv\Scripts\python.exe scripts/analyze-video.py 'source.json完整路径' --language zh
@@ -79,7 +106,7 @@ node scripts/reader.mjs video '已筛选的视频帖子链接'
 
 默认数据目录 `%LOCALAPPDATA%\XhsResearch`，包含独立登录资料、访问链接、视频与衍生文件，不在 Git 仓库内。请勿把整个目录附到 Issue。
 
-可配置：`XHS_STATE_DIR`（浏览器/媒体目录）、`XHS_MODEL_DIR`（模型目录）、`XHS_CHROME_PATH`（Chrome 路径）。不读取日常浏览器 Cookie，不把登录信息发给转录服务；ASR 使用本地 CPU。AI 助手读取材料时仍受所用服务的数据处理规则约束。
+可配置：`XHS_STATE_DIR`（浏览器/媒体目录）、`XHS_MODEL_DIR`（模型目录）、`XHS_CHROME_PATH`（Chrome 路径）。不读取日常浏览器 Cookie，本地 ASR 使用本地 CPU；选择点点路线会将所选媒体交给点点服务处理，不会发送小红书 Cookie。AI 助手读取材料时仍受所用服务的数据处理规则约束。
 
 每次最多 10 张首屏搜索卡片；评论是可见子集；单视频上限 30 分钟、500 MiB。遇到登录、验证、限流、403 或访问限制会停止，不绕过或换账号。
 
@@ -97,7 +124,7 @@ node scripts/reader.mjs video '已筛选的视频帖子链接'
 ## 中断后的恢复
 
 - **锁文件**：`reader.lock`、`analysis.lock`、模型目录 `prepare.lock` 保存进程信息。先查看对应 PID 的进程和启动时间；确认原进程已经退出后，才移除那个锁文件。不要只因为文件较旧就删除；PID 可能被重用。
-- **模型下载中断**：确认没有仍在运行的准备进程，按上项处理残留锁后重跑 `setup.ps1 -Video`。哈希正确的完整文件会复用，未完成文件会重新获取并校验。
+- **模型下载中断**：确认没有仍在运行的准备进程，按上项处理残留锁后重跑 `setup.ps1 -Transcribe`。哈希正确的完整文件会复用，未完成文件会重新获取并校验。
 - **视频存在但 source.json 缺失 / 残留 .part**：程序会拒绝覆盖。保留该视频目录，记录文件长度与 SHA-256，确认是预期帖子并检查视频是否可解码，再联系维护者处理收据恢复；不要把未知文件手动标记成已验证。其他视频仍可处理。若选择重新获取，先将整个受影响视频目录移到本地备份位置，保留原始材料，勿上传备份。
 - **迁移仓库位置**：编辑已安装技能中的旧路径，或先备份并移走那个技能目录，再重新运行 `install-skill.ps1`；安装器不会覆盖已有技能。
 
@@ -118,4 +145,4 @@ npm test
 
 ## English
 
-XHS Research Studio is a Windows-first, read-only Xiaohongshu / RedNote research skill: search experience posts, triage captions and comments, transcribe selected videos locally, and inspect timestamped scene/uniform frames with your AI assistant. No paid API key or social-write commands. Windows preview; Chrome, Node 20+, and Python 3.12 for video. Machine transcripts and sampled frames are evidence aids, not guaranteed accuracy or continuous video review.
+XHS Research Studio is a Windows-first, read-only Xiaohongshu / RedNote research skill: search experience posts, triage captions and comments, transcribe selected videos locally, and inspect timestamped scene/uniform frames with your AI assistant. No model or Python download for basic research and browser frames. Optional cloud transcription needs your own API key; local ASR is separately installed. No social-write commands. Windows preview; Chrome, Node 20+, and Python 3.12 for video. Machine transcripts and sampled frames are evidence aids, not guaranteed accuracy or continuous video review.

@@ -12,7 +12,8 @@ export function mediaUrl(raw) {
   return u.href;
 }
 
-export async function acquireVideo(page, state, note) {
+export async function resolveVideo(page) {
+  if (new URL(page.url()).origin !== "https://www.xiaohongshu.com") throw new Error("Unexpected media page");
   const id = new URL(page.url()).pathname.split('/').pop();
   if (!/^[a-f0-9]{24}$/.test(id)) throw new Error('Invalid note ID');
   await page.waitForFunction(() => {
@@ -33,6 +34,11 @@ export async function acquireVideo(page, state, note) {
   candidates.sort((a,b) => Math.abs((a.height||720)-720)-Math.abs((b.height||720)-720));
   if (!candidates.length) throw new Error('No accessible bounded video stream; no bypass attempted');
   const url = mediaUrl(candidates[0].url);
+  return {id,media,url};
+}
+
+export async function acquireVideo(page,state,note) {
+  const {id,media,url}=await resolveVideo(page);
   const out = path.resolve(state,'video',id);
   fs.mkdirSync(out,{recursive:true});
   const receiptFile = path.join(out,'source.json');

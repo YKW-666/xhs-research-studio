@@ -16,3 +16,5 @@ __pycache__/
 *.pyc
 !package-lock.json
 !requirements-video.lock.txt
+
+dots-api-key.txt
