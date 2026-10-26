@@ -1,10 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import {createHash} from 'node:crypto';
 import path from 'node:path';
 import os from 'node:os';
 import { chromium } from 'playwright';
 import {frameTimes,captureFrames} from '../scripts/browser-frames.mjs';
+import {browserAudio} from '../scripts/browser-audio.mjs';
 
 test('bounded frame selection rejects invalid inputs',()=>{
   assert.equal(frameTimes(60).length,8);
@@ -31,6 +33,11 @@ test('browser-only frame capture works without Python or model and stops on guar
     assert.equal(r.frames.length,2);assert.equal(r.status,'sampled-frames-ready');
     assert.equal(r.audioTranscribed,false);assert.equal(r.visualReviewed,false);
     assert.notDeepEqual(fs.readFileSync(r.frames[0].file),fs.readFileSync(r.frames[1].file));
+    const bytes=Buffer.from(fixture.base64,'base64');const file=path.join(out,'fixture.mp4');fs.writeFileSync(file,bytes);
+    const audio=await browserAudio(p,file,3,createHash('sha256').update(bytes).digest('hex'));
+    assert.equal(audio.sampleRate,16000);assert.equal(audio.chunks.length,1);assert.ok(Math.abs(audio.durationSeconds-3)<0.1);
+    const wav=Buffer.from(audio.chunks[0].data.split(',')[1],'base64');assert.equal(wav.toString('ascii',0,4),'RIFF');assert.equal(wav.readUInt32LE(24),16000);
+    assert.match(audio.mediaSha256,/^[a-f0-9]{64}$/);
     await assert.rejects(captureFrames(p,out,{}, {guard:async()=>{throw new Error('blocked fixture');}}),/blocked fixture/);
   } finally {await browser.close();}
 });

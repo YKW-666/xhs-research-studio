@@ -15,8 +15,10 @@ $save.Add_Click({
     $temporary = $null
     try {
     New-Item -ItemType Directory -Force -Path $state | Out-Null
-    $keyFile = Join-Path $state 'dots-api-key.txt'
-    $temporary = Join-Path $state ('dots-key-' + [Guid]::NewGuid().ToString('N') + '.tmp')
+    $keyFile = if ($env:XHS_DOTS_KEY_FILE) { $env:XHS_DOTS_KEY_FILE } else { Join-Path $state 'dots-api-key.txt' }
+    $keyDirectory = Split-Path -Parent ([IO.Path]::GetFullPath($keyFile))
+    New-Item -ItemType Directory -Force -Path $keyDirectory | Out-Null
+    $temporary = Join-Path $keyDirectory ('dots-key-' + [Guid]::NewGuid().ToString('N') + '.tmp')
     [IO.File]::WriteAllText($temporary,'')
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent().Name
     & icacls $temporary /inheritance:r /grant:r "${identity}:F" 'SYSTEM:F' | Out-Null
