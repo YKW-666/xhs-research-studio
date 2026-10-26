@@ -1,4 +1,8 @@
 import fs from 'node:fs';
+import {browserAudio} from './browser-audio.mjs';
+import {cloudChunks} from './cloud-chunks.mjs';
+import {loadDotsKey} from './dots-client.mjs';
+import { captureFrames } from './browser-frames.mjs';
 import { acquireVideo } from './video-download.mjs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -13,14 +17,16 @@ const chrome = process.env.XHS_CHROME_PATH || [
   path.join(process.env.LOCALAPPDATA || os.homedir(),'Google/Chrome/Application/chrome.exe')
 ].find(p => fs.existsSync(p));
 async function main() {
-const [command, value] = process.argv.slice(2);
-if (!['login','status','search','read','video'].includes(command)) { console.error('Allowed: login | status | search KEYWORD | read FULL_NOTE_URL | video FULL_NOTE_URL'); process.exit(2); }
+const [command, value, ...timestamps] = process.argv.slice(2);
+if (!['login','status','search','read','video','frames','dots','audio'].includes(command)) { console.error('Allowed: login | status | search KEYWORD | read FULL_NOTE_URL | video FULL_NOTE_URL | frames FULL_NOTE_URL [SECONDS...] | audio FULL_NOTE_URL | dots FULL_NOTE_URL --allow-cloud'); process.exit(2); }
+if(command==='dots' && !timestamps.includes('--allow-cloud'))throw new Error('Dots sends the selected media URL to the official cloud API. Add --allow-cloud only after accepting this and checking current pricing.');
+const dotsKey=command==='dots'?loadDotsKey(state):null;
 let target = 'https://www.xiaohongshu.com/explore';
 if (command === 'search') {
   if (!value || value.length > 120) throw new Error('Keyword must be 1-120 characters');
   target = `https://www.xiaohongshu.com/search_result?keyword=${encodeURIComponent(value)}`;
 }
-if (command === 'read' || command === 'video') {
+if (['read','video','frames','dots','audio'].includes(command)) {
   const u = new URL(value);
   if (u.protocol !== 'https:' || u.hostname !== 'www.xiaohongshu.com' || u.port || u.username || u.password || !/^\/(explore|discovery\/item)\/[a-f0-9]{24}$/.test(u.pathname)) throw new Error('Use a full HTTPS Xiaohongshu note URL from search results');
   const cachedPath = path.join(state, 'note-links.json');
@@ -88,6 +94,10 @@ try {
     await page.waitForSelector('#detail-title, #detail-desc', {timeout:10000}).catch(() => {});
     observed = await inspect(page);
     if (observed.blocked || new URL(observed.url).origin !== 'https://www.xiaohongshu.com' || new URL(observed.url).pathname !== new URL(target).pathname) throw new Error('Blocked or wrong note; stopped');
+    if (['video','frames','dots','audio'].includes(command)) {
+      await page.locator('video').first().waitFor({state:'attached',timeout:15000}).catch(()=>{throw new Error('No video player became available; stopped');});
+      const current=await inspect(page);if(current.blocked)throw new Error('Access restriction; stopped');
+    }
     const note = await page.evaluate(() => {
       const text = selector => document.querySelector(selector)?.innerText?.trim() || '';
       const visible = e => e.getClientRects().length > 0;
@@ -101,6 +111,25 @@ try {
       };
     });
     result = { ...observed, status: note.body || note.title ? 'read' : 'content-not-found', ...note };
+    if (command === 'audio') {
+      const media=await acquireVideo(page,state,note,{preferAudio:true});
+      const decoded=await browserAudio(page,media.file,media.durationSeconds,media.sha256);
+      const folder=path.join(state,'browser-audio',media.noteId,decoded.mediaSha256);fs.mkdirSync(folder,{recursive:true});
+      const parts=decoded.chunks.map((p,i)=>{const file=path.join(folder,`part-${i}.wav`);fs.writeFileSync(file,Buffer.from(p.data.split(',')[1],'base64'));return {start:p.start,end:p.end,file};});
+      result.browserAudio={durationSeconds:decoded.durationSeconds,mediaBytes:decoded.mediaBytes,mediaSha256:decoded.mediaSha256,sampleRate:decoded.sampleRate,parts};
+    }
+    if (command === 'dots') {
+      if (!note.video.present)throw new Error('No video found');
+      const media=await acquireVideo(page,state,note,{preferAudio:true});
+      const audio=await browserAudio(page,media.file,media.durationSeconds,media.sha256);
+      const current=await inspect(page);if(current.blocked || new URL(current.url).pathname!==new URL(target).pathname)throw new Error('Page changed or became restricted; stopped before cloud submission');
+      result.cloudTranscript=await cloudChunks({audio,state,noteId:media.noteId,key:dotsKey,allowCloud:true});
+    }
+    if (command === 'frames') {
+      if(timestamps.some(t=>!/^\d+(\.\d+)?$/.test(t)))throw new Error('Frame timestamps must be nonnegative seconds');
+      if (!note.video.present) throw new Error('No video found');
+      result.frameCapture = await captureFrames(page,state,note,{times:timestamps.map(Number),guard:async()=>{const seen=await inspect(page);if(seen.blocked || new URL(seen.url).origin!=='https://www.xiaohongshu.com' || new URL(seen.url).pathname!==new URL(target).pathname)throw new Error('Access restriction or navigation change; stopped');}});
+    }
     if (command === 'video') {
       if (!note.video.present || !(note.body || note.title)) throw new Error('No verified video note');
       result.acquisition = await acquireVideo(page, state, note);

@@ -12,7 +12,8 @@ export function mediaUrl(raw) {
   return u.href;
 }
 
-export async function acquireVideo(page, state, note) {
+export async function resolveVideo(page,{preferAudio=false}={}) {
+  if (new URL(page.url()).origin !== "https://www.xiaohongshu.com") throw new Error("Unexpected media page");
   const id = new URL(page.url()).pathname.split('/').pop();
   if (!/^[a-f0-9]{24}$/.test(id)) throw new Error('Invalid note ID');
   await page.waitForFunction(() => {
@@ -23,16 +24,25 @@ export async function acquireVideo(page, state, note) {
     // Same state fields as yt-dlp's XiaoHongShuIE, obtained from the authenticated page.
     const entry = window.__INITIAL_STATE__?.note?.noteDetailMap?.[id]?.note;
     const streams = Object.values(entry?.video?.media?.stream || {}).flat();
-    const candidates = streams.filter(s => s?.masterUrl).map(s => ({url:s.masterUrl,width:s.width,height:s.height,size:s.size}));
+    const candidates = streams.filter(s => s?.masterUrl).map(s => ({url:s.masterUrl,width:s.width,height:s.height,size:s.size,audioBitrate:Number(s.audioBitrate)||0}));
     const v = document.querySelector('video');
     if (!candidates.length && v?.currentSrc?.startsWith('https:')) candidates.push({url:v.currentSrc});
     return {candidates, duration: v?.duration};
   }, id);
   if (!Number.isFinite(media.duration) || media.duration <= 0 || media.duration > 1800) throw new Error('Missing duration or video exceeds 30-minute per-run limit');
-  const candidates = media.candidates.filter(s => !s.size || s.size <= 500*1024*1024);
-  candidates.sort((a,b) => Math.abs((a.height||720)-720)-Math.abs((b.height||720)-720));
+  let candidates = media.candidates.filter(s => !s.size || s.size <= 500*1024*1024);
+  if(preferAudio) {
+    const highestAudioBitrate=Math.max(0,...candidates.map(s=>s.audioBitrate||0));
+    if(highestAudioBitrate) candidates=candidates.filter(s=>s.audioBitrate===highestAudioBitrate);
+    candidates.sort((a,b)=>(a.size||Infinity)-(b.size||Infinity)||(a.height||Infinity)-(b.height||Infinity));
+  } else candidates.sort((a,b) => Math.abs((a.height||720)-720)-Math.abs((b.height||720)-720));
   if (!candidates.length) throw new Error('No accessible bounded video stream; no bypass attempted');
   const url = mediaUrl(candidates[0].url);
+  return {id,media,url};
+}
+
+export async function acquireVideo(page,state,note,options={}) {
+  const {id,media,url}=await resolveVideo(page,options);
   const out = path.resolve(state,'video',id);
   fs.mkdirSync(out,{recursive:true});
   const receiptFile = path.join(out,'source.json');

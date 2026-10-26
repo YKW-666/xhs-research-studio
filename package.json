@@ -1,6 +1,6 @@
 {
   "name": "xhs-research-studio",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Read-only Xiaohongshu research with local video transcripts and timestamped frames for Windows.",
   "license": "MIT",
